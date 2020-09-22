@@ -1,187 +1,173 @@
-import torch
 from torch.autograd import Variable
-
+import torch
+from torch import nn
 import numpy as np
-from scipy.ndimage.interpolation import map_coordinates as sp_map_coordinates
 
 
-def th_flatten(a):
-    """Flatten tensor"""
-    return a.contiguous().view(a.nelement())
+class DeformConv2D(nn.Module):
+    def __init__(self, inc, outc, kernel_size=3, padding=1, bias=None):
+        super(DeformConv2D, self).__init__()
+        self.kernel_size = kernel_size
+        self.padding = padding
+        self.zero_padding = nn.ZeroPad2d(padding)
+        self.conv_kernel = nn.Conv2d(inc, outc, kernel_size=kernel_size, stride=kernel_size, bias=bias)
+
+    def forward(self, x, offset):
+        dtype = offset.data.type()
+        ks = self.kernel_size
+        N = offset.size(1) // 2
+
+        # Change offset's order from [x1, x2, ..., y1, y2, ...] to [x1, y1, x2, y2, ...]
+        # Codes below are written to make sure same results of MXNet implementation.
+        # You can remove them, and it won't influence the module's performance.
+        offsets_index = Variable(torch.cat([torch.arange(0, 2*N, 2).to(self.conv_kernel.weight.device), torch.arange(1, 2*N+1, 2).to(self.conv_kernel.weight.device)]), requires_grad=False).type_as(x).long().to(self.conv_kernel.weight.device)
+        offsets_index = offsets_index.unsqueeze(dim=0).unsqueeze(dim=-1).unsqueeze(dim=-1).expand(*offset.size())
+        offset = torch.gather(offset, dim=1, index=offsets_index)
+        # ------------------------------------------------------------------------
+
+        if self.padding:
+            x = self.zero_padding(x)
+
+        # (b, 2N, h, w)
+        p = self._get_p(offset, dtype)
+
+        # (b, h, w, 2N)
+        p = p.contiguous().permute(0, 2, 3, 1)
+        q_lt = Variable(p.data, requires_grad=False).floor()
+        q_rb = q_lt + 1
+
+        q_lt = torch.cat([torch.clamp(q_lt[..., :N], 0, x.size(2)-1), torch.clamp(q_lt[..., N:], 0, x.size(3)-1)], dim=-1).long()
+        q_rb = torch.cat([torch.clamp(q_rb[..., :N], 0, x.size(2)-1), torch.clamp(q_rb[..., N:], 0, x.size(3)-1)], dim=-1).long()
+        q_lb = torch.cat([q_lt[..., :N], q_rb[..., N:]], -1)
+        q_rt = torch.cat([q_rb[..., :N], q_lt[..., N:]], -1)
+
+        # (b, h, w, N)
+        mask = torch.cat([p[..., :N].lt(self.padding)+p[..., :N].gt(x.size(2)-1-self.padding),
+                          p[..., N:].lt(self.padding)+p[..., N:].gt(x.size(3)-1-self.padding)], dim=-1).type_as(p)
+        mask = mask.detach()
+        floor_p = p - (p - torch.floor(p))
+        p = p*(1-mask) + floor_p*mask
+        p = torch.cat([torch.clamp(p[..., :N], 0, x.size(2)-1), torch.clamp(p[..., N:], 0, x.size(3)-1)], dim=-1)
+
+        # bilinear kernel (b, h, w, N)
+        g_lt = (1 + (q_lt[..., :N].type_as(p) - p[..., :N])) * (1 + (q_lt[..., N:].type_as(p) - p[..., N:]))
+        g_rb = (1 - (q_rb[..., :N].type_as(p) - p[..., :N])) * (1 - (q_rb[..., N:].type_as(p) - p[..., N:]))
+        g_lb = (1 + (q_lb[..., :N].type_as(p) - p[..., :N])) * (1 - (q_lb[..., N:].type_as(p) - p[..., N:]))
+        g_rt = (1 - (q_rt[..., :N].type_as(p) - p[..., :N])) * (1 + (q_rt[..., N:].type_as(p) - p[..., N:]))
+
+        # (b, c, h, w, N)
+        x_q_lt = self._get_x_q(x, q_lt, N)
+        x_q_rb = self._get_x_q(x, q_rb, N)
+        x_q_lb = self._get_x_q(x, q_lb, N)
+        x_q_rt = self._get_x_q(x, q_rt, N)
+
+        # (b, c, h, w, N)
+        x_offset = g_lt.unsqueeze(dim=1) * x_q_lt + \
+                   g_rb.unsqueeze(dim=1) * x_q_rb + \
+                   g_lb.unsqueeze(dim=1) * x_q_lb + \
+                   g_rt.unsqueeze(dim=1) * x_q_rt
+
+        x_offset = self._reshape_x_offset(x_offset, ks)
+        out = self.conv_kernel(x_offset)
+
+        return out
+
+    def _get_p_n(self, N, dtype):
+        p_n_x, p_n_y = np.meshgrid(range(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1),
+                          range(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1), indexing='ij')
+        # (2N, 1)
+        p_n = np.concatenate((p_n_x.flatten(), p_n_y.flatten()))
+        p_n = np.reshape(p_n, (1, 2*N, 1, 1))
+        p_n = Variable(torch.from_numpy(p_n).to(self.conv_kernel.weight.device).type(dtype), requires_grad=False)
+
+        return p_n
+
+    @staticmethod
+    def _get_p_0(h, w, N, dtype, device=torch.device('cpu')):
+        p_0_x, p_0_y = np.meshgrid(range(1, h+1), range(1, w+1), indexing='ij')
+        p_0_x = p_0_x.flatten().reshape(1, 1, h, w).repeat(N, axis=1)
+        p_0_y = p_0_y.flatten().reshape(1, 1, h, w).repeat(N, axis=1)
+        p_0 = np.concatenate((p_0_x, p_0_y), axis=1)
+        p_0 = Variable(torch.from_numpy(p_0).to(device).type(dtype), requires_grad=False)
+
+        return p_0
+
+    def _get_p(self, offset, dtype):
+        N, h, w = offset.size(1)//2, offset.size(2), offset.size(3)
+
+        # (1, 2N, 1, 1)
+        p_n = self._get_p_n(N, dtype)
+        # (1, 2N, h, w)
+        p_0 = self._get_p_0(h, w, N, dtype, self.conv_kernel.weight.device)
+        p = p_0 + p_n + offset
+        return p
+
+    def _get_x_q(self, x, q, N):
+        b, h, w, _ = q.size()
+        padded_w = x.size(3)
+        c = x.size(1)
+        # (b, c, h*w)
+        x = x.contiguous().view(b, c, -1)
+
+        # (b, h, w, N)
+        index = q[..., :N]*padded_w + q[..., N:]  # offset_x*w + offset_y
+        # (b, c, h*w*N)
+        index = index.contiguous().unsqueeze(dim=1).expand(-1, c, -1, -1, -1).contiguous().view(b, c, -1)
+
+        x_offset = x.gather(dim=-1, index=index).contiguous().view(b, c, h, w, N)
+
+        return x_offset
+
+    @staticmethod
+    def _reshape_x_offset(x_offset, ks):
+        b, c, h, w, N = x_offset.size()
+        x_offset = torch.cat([x_offset[..., s:s+ks].contiguous().view(b, c, h, w*ks) for s in range(0, N, ks)], dim=-1)
+        x_offset = x_offset.contiguous().view(b, c, h*ks, w*ks)
+
+        return x_offset
 
 
-def th_repeat(a, repeats, axis=0):
-    """Torch version of np.repeat for 1D"""
-    assert len(a.size()) == 1
-    return th_flatten(torch.transpose(a.repeat(repeats, 1), 0, 1))
+class DeformNet(nn.Module):
+    def __init__(self):
+        super(DeformNet, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, padding=1)
+        self.bn1 = nn.BatchNorm2d(32)
+
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, padding=1)
+        self.bn2 = nn.BatchNorm2d(64)
+
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.bn3 = nn.BatchNorm2d(128)
+
+        self.offsets = nn.Conv2d(128, 18, kernel_size=3, padding=1)
+        self.conv4 = DeformConv2D(128, 128, kernel_size=3, padding=1)
+        self.bn4 = nn.BatchNorm2d(128)
+
+        self.classifier = nn.Linear(128, 10)
+
+    def forward(self, x):
+        # convs
+        x = F.relu(self.conv1(x))
+        x = self.bn1(x)
+        x = F.relu(self.conv2(x))
+        x = self.bn2(x)
+        x = F.relu(self.conv3(x))
+        x = self.bn3(x)
+        # deformable convolution
+        offsets = self.offsets(x)
+        x = F.relu(self.conv4(x, offsets))
+        x = self.bn4(x)
+
+        x = F.avg_pool2d(x, kernel_size=28, stride=1).view(x.size(0), -1)
+        x = self.classifier(x)
+
+        return F.log_softmax(x, dim=1)
 
 
-def np_repeat_2d(a, repeats):
-    """Tensorflow version of np.repeat for 2D"""
-
-    assert len(a.shape) == 2
-    a = np.expand_dims(a, 0)
-    a = np.tile(a, [repeats, 1, 1])
-    return a
-
-
-def th_gather_2d(input, coords):
-    inds = coords[:, 0]*input.size(1) + coords[:, 1]
-    x = torch.index_select(th_flatten(input), 0, inds)
-    return x.view(coords.size(0))
-
-
-def th_map_coordinates(input, coords, order=1):
-    """Tensorflow verion of scipy.ndimage.map_coordinates
-    Note that coords is transposed and only 2D is supported
-    Parameters
-    ----------
-    input : tf.Tensor. shape = (s, s)
-    coords : tf.Tensor. shape = (n_points, 2)
-    """
-
-    assert order == 1
-    input_size = input.size(0)
-
-    coords = torch.clamp(coords, 0, input_size - 1)
-    coords_lt = coords.floor().long()
-    coords_rb = coords.ceil().long()
-    coords_lb = torch.stack([coords_lt[:, 0], coords_rb[:, 1]], 1)
-    coords_rt = torch.stack([coords_rb[:, 0], coords_lt[:, 1]], 1)
-
-    vals_lt = th_gather_2d(input,  coords_lt.detach())
-    vals_rb = th_gather_2d(input,  coords_rb.detach())
-    vals_lb = th_gather_2d(input,  coords_lb.detach())
-    vals_rt = th_gather_2d(input,  coords_rt.detach())
-
-    coords_offset_lt = coords - coords_lt.type(coords.data.type())
-
-    vals_t = vals_lt + (vals_rt - vals_lt) * coords_offset_lt[:, 0]
-    vals_b = vals_lb + (vals_rb - vals_lb) * coords_offset_lt[:, 0]
-    mapped_vals = vals_t + (vals_b - vals_t) * coords_offset_lt[:, 1]
-    return mapped_vals
-
-
-def sp_batch_map_coordinates(inputs, coords):
-    """Reference implementation for batch_map_coordinates"""
-    # coords = coords.clip(0, inputs.shape[1] - 1)
-
-    assert (coords.shape[2] == 2)
-    height = coords[:,:,0].clip(0, inputs.shape[1] - 1)
-    width = coords[:,:,1].clip(0, inputs.shape[2] - 1)
-    np.concatenate((np.expand_dims(height, axis=2), np.expand_dims(width, axis=2)), 2)
-
-    mapped_vals = np.array([
-        sp_map_coordinates(input, coord.T, mode='nearest', order=1)
-        for input, coord in zip(inputs, coords)
-    ])
-    return mapped_vals
-
-
-def th_batch_map_coordinates(input, coords, order=1):
-    """Batch version of th_map_coordinates
-    Only supports 2D feature maps
-    Parameters
-    ----------
-    input : tf.Tensor. shape = (b, s, s)
-    coords : tf.Tensor. shape = (b, n_points, 2)
-    Returns
-    -------
-    tf.Tensor. shape = (b, s, s)
-    """
-
-    batch_size = input.size(0)
-    input_height = input.size(1)
-    input_width = input.size(2)
-
-    n_coords = coords.size(1)
-
-    # coords = torch.clamp(coords, 0, input_size - 1)
-
-    coords = torch.cat((torch.clamp(coords.narrow(2, 0, 1), 0, input_height - 1), torch.clamp(coords.narrow(2, 1, 1), 0, input_width - 1)), 2)
-
-    assert (coords.size(1) == n_coords)
-
-    coords_lt = coords.floor().long()
-    coords_rb = coords.ceil().long()
-    coords_lb = torch.stack([coords_lt[..., 0], coords_rb[..., 1]], 2)
-    coords_rt = torch.stack([coords_rb[..., 0], coords_lt[..., 1]], 2)
-    idx = th_repeat(torch.arange(0, batch_size), n_coords).long()
-    idx = Variable(idx, requires_grad=False)
-    if input.is_cuda:
-        idx = idx.cuda()
-
-    def _get_vals_by_coords(input, coords):
-        indices = torch.stack([
-            idx, th_flatten(coords[..., 0]), th_flatten(coords[..., 1])
-        ], 1)
-        inds = indices[:, 0]*input.size(1)*input.size(2)+ indices[:, 1]*input.size(2) + indices[:, 2]
-        vals = th_flatten(input).index_select(0, inds)
-        vals = vals.view(batch_size, n_coords)
-        return vals
-
-    vals_lt = _get_vals_by_coords(input, coords_lt.detach())
-    vals_rb = _get_vals_by_coords(input, coords_rb.detach())
-    vals_lb = _get_vals_by_coords(input, coords_lb.detach())
-    vals_rt = _get_vals_by_coords(input, coords_rt.detach())
-
-    coords_offset_lt = coords - coords_lt.type(coords.data.type())
-    vals_t = coords_offset_lt[..., 0]*(vals_rt - vals_lt) + vals_lt
-    vals_b = coords_offset_lt[..., 0]*(vals_rb - vals_lb) + vals_lb
-    mapped_vals = coords_offset_lt[..., 1]* (vals_b - vals_t) + vals_t
-    return mapped_vals
-
-
-def sp_batch_map_offsets(input, offsets):
-    """Reference implementation for tf_batch_map_offsets"""
-
-    batch_size = input.shape[0]
-    input_height = input.shape[1]
-    input_width = input.shape[2]
-
-    offsets = offsets.reshape(batch_size, -1, 2)
-    grid = np.stack(np.mgrid[:input_height, :input_width], -1).reshape(-1, 2)
-    grid = np.repeat([grid], batch_size, axis=0)
-    coords = offsets + grid
-    # coords = coords.clip(0, input_size - 1)
-
-    mapped_vals = sp_batch_map_coordinates(input, coords)
-    return mapped_vals
-
-
-def th_generate_grid(batch_size, input_height, input_width, dtype, cuda):
-    grid = np.meshgrid(
-        range(input_height), range(input_width), indexing='ij'
-    )
-    grid = np.stack(grid, axis=-1)
-    grid = grid.reshape(-1, 2)
-
-    grid = np_repeat_2d(grid, batch_size)
-    grid = torch.from_numpy(grid).type(dtype)
-    if cuda:
-        grid = grid.cuda()
-    return Variable(grid, requires_grad=False)
-
-
-def th_batch_map_offsets(input, offsets, grid=None, order=1):
-    """Batch map offsets into input
-    Parameters
-    ---------
-    input : torch.Tensor. shape = (b, s, s)
-    offsets: torch.Tensor. shape = (b, s, s, 2)
-    Returns
-    -------
-    torch.Tensor. shape = (b, s, s)
-    """
-    batch_size = input.size(0)
-    input_height = input.size(1)
-    input_width = input.size(2)
-
-    offsets = offsets.view(batch_size, -1, 2)
-    if grid is None:
-        grid = th_generate_grid(batch_size, input_height, input_width, offsets.data.type(), offsets.data.is_cuda)
-
-    coords = offsets + grid
-
-    mapped_vals = th_batch_map_coordinates(input, coords)
-    return mapped_vals
+if __name__ == '__main__':
+    import torch.nn.functional as F
+    device = torch.device('cuda:1')
+    model = DeformNet().float().to(device)
+    input = torch.randn((1,1,28,28)).float().to(device)
+    output = model(input)
+    print(output.shape)
