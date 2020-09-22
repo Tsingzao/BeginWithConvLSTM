@@ -81,7 +81,7 @@ class TrajGRU(nn.Module):
         if forConvList:
             for i in range(self.nlayer):
                 TrajGRUList.append(TrajGRUCell(inChannel, hiddenList[i], kernelList[i]))
-                inChannel = self.forConvList[i].out_channels
+                inChannel = forConvList[i].out_channels
         else:
             for i in range(self.nlayer):
                 inChannel = enConvList[i].out_channels if enConvList else inChannel
@@ -126,10 +126,8 @@ class TrajGRU(nn.Module):
         b, c, hh, ww = self.shape
         if not input:
             input = []
-            h0, w0 = hh, ww
             for i in range(self.timeLen):
-                input.append(torch.zeros(b, c, h0, w0).to(self.TrajGRUList[0].conv.weight.device))
-                h0, w0 = h0 * self.forConvList[i].stride, w0 * self.forConvList[i].stride
+                input.append(torch.zeros(b, c, hh, ww).to(self.TrajGRUList[0].conv.weight.device))
         if state is None:
             state = []
             h0, w0 = hh, ww
@@ -141,25 +139,28 @@ class TrajGRU(nn.Module):
         t = self.timeLen
         outputList = []
         for tt in range(t):
+            inp = input[tt]
             for l in range(self.nlayer):
                 h = state[l]
-                h = self.ConvGRUList[l](input, h)
-                input = h
+                h = self.TrajGRUList[l](inp, h)
                 state[l] = h
-            outputList.append(input)
+                inp = self.forConvList[l](h) if self.forConvList else h
+            outputList.append(inp)
         outputList = torch.stack(outputList, dim=1)
         return outputList, h
 
 
 if __name__ == '__main__':
     device = torch.device('cuda:0')
-    convList = nn.ModuleList([nn.Conv2d(in_channels=4, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(device),
-                              nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1).float().to(device)])
+    convList = nn.ModuleList([nn.Conv2d(in_channels=4, out_channels=64, kernel_size=3, padding=1).float().to(device),
+                              nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(device)])
     forList = nn.ModuleList([nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, padding=1, stride=2).float().to(device),
                              nn.Conv2d(in_channels=32, out_channels=4, kernel_size=3, padding=1).float().to(device)])
     model1 = TrajGRU(4, [32, 64], [3, 3], enConvList=convList).float().to(device)
-    model2 = TrajGRU(4, [64, 32], [3, 3], forConvList=forList).float().to(device)
+    model2 = TrajGRU(64, [64, 32], [3, 3], forConvList=forList, shape=(1, 64, 128, 128), timeLen=6).float().to(device)
     input = torch.randn((1, 3, 4, 256, 256)).float().to(device)
+    print(input.shape)
     output = model1(input)
-
     print(output[0][0].shape, output[1][0].shape, output[1][1].shape)
+    output = model2(input=None, state=output[1][::-1])
+    print(output[0].shape)
