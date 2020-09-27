@@ -119,7 +119,7 @@ class PredRNN(nn.Module):
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:0')
+    device = torch.device('cuda:1')
     from easydict import EasyDict as edict
     configs = edict()
     configs.patch_size = 4
