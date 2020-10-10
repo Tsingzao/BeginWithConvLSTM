@@ -1,3 +1,6 @@
+# forked from https://github.com/metrofun/E3D-LSTM
+
+
 from functools import reduce
 import copy
 import operator
@@ -183,16 +186,17 @@ if __name__ == '__main__':
     device = torch.device("cuda:2")
     dtype = torch.float
 
-    input_time_window = 4
-    output_time_horizon = 1
+    h, w, c = 32, 32, 4
+    input_time_window = 4 
+    output_time_horizon = 1 
     temporal_stride = 1
-    temporal_frames = 2
+    temporal_frames = 2 
     time_steps = (input_time_window - temporal_frames + 1) // temporal_stride
 
     # Initiate the network
     # CxT×H×W
-    input_shape = (2, temporal_frames, 32, 32)
-    output_shape = (2, output_time_horizon, 32, 32)
+    input_shape = (c, temporal_frames, h, w)
+    output_shape = (c, output_time_horizon, h, w)
 
     tau = 2
     hidden_size = 64
@@ -202,8 +206,8 @@ if __name__ == '__main__':
     encoder = E3DLSTM(input_shape, hidden_size, lstm_layers, kernel, tau).type(dtype).to(device)
     decoder = nn.Conv3d(hidden_size * time_steps, output_shape[0], kernel, padding=(0, 2, 2)).type(dtype).to(device)
 
-    # input = torch.randn((4, 1, 2, 2, 32, 32)).float().to(device)
-    # output = encoder(input)
-    # print(output.shape)
-    # output = decoder(output)
-    # print(output.shape)
+    input = torch.randn((time_steps, 1, c, temporal_frames, h, w)).float().to(device)
+    output = encoder(input)
+    print(output.shape)
+    output = decoder(output)
+    print(output.shape)
