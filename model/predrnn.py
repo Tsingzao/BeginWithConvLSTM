@@ -1,6 +1,44 @@
 # forked from https://github.com/thuml/predrnn-pytorch
 import torch
 import torch.nn as nn
+import numpy as np
+
+def reshape_patch(img_tensor, patch_size):
+    assert 5 == img_tensor.ndim
+    batch_size = np.shape(img_tensor)[0]
+    seq_length = np.shape(img_tensor)[1]
+    img_height = np.shape(img_tensor)[2]
+    img_width = np.shape(img_tensor)[3]
+    num_channels = np.shape(img_tensor)[4]
+    a = np.reshape(img_tensor, [batch_size, seq_length,
+                                img_height//patch_size, patch_size,
+                                img_width//patch_size, patch_size,
+                                num_channels])
+    b = np.transpose(a, [0,1,2,4,3,5,6])
+    patch_tensor = np.reshape(b, [batch_size, seq_length,
+                                  img_height//patch_size,
+                                  img_width//patch_size,
+                                  patch_size*patch_size*num_channels])
+    return patch_tensor
+
+def reshape_patch_back(patch_tensor, patch_size):
+    assert 5 == patch_tensor.ndim
+    batch_size = np.shape(patch_tensor)[0]
+    seq_length = np.shape(patch_tensor)[1]
+    patch_height = np.shape(patch_tensor)[2]
+    patch_width = np.shape(patch_tensor)[3]
+    channels = np.shape(patch_tensor)[4]
+    img_channels = channels // (patch_size*patch_size)
+    a = np.reshape(patch_tensor, [batch_size, seq_length,
+                                  patch_height, patch_width,
+                                  patch_size, patch_size,
+                                  img_channels])
+    b = np.transpose(a, [0,1,2,4,3,5,6])
+    img_tensor = np.reshape(b, [batch_size, seq_length,
+                                patch_height * patch_size,
+                                patch_width * patch_size,
+                                img_channels])
+    return img_tensor
 
 class SpatioTemporalLSTMCell(nn.Module):
     def __init__(self, in_channel, num_hidden, width, filter_size, stride):
@@ -115,21 +153,26 @@ class PredRNN(nn.Module):
         # [length, batch, channel, height, width] -> [batch, length, height, width, channel]
         next_frames = torch.stack(next_frames, dim=0).permute(1, 0, 3, 4, 2).contiguous()
 
-        return next_frames
+        return next_frames[:,-(self.configs.total_length-self.configs.input_length):]
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:1')
+    device = torch.device('cuda:6')
     from easydict import EasyDict as edict
     configs = edict()
     configs.patch_size = 4
     configs.img_width = 64
     configs.filter_size = 5
     configs.stride = 1
-    configs.total_length = 6
-    configs.input_length = 3
+    configs.total_length = 9
+    configs.input_length = 6
     configs.device = device
-    model = PredRNN(2, [32, 32], configs).float().to(device)
-    input = torch.randn((1,6,16,16,16)).float().to(device)
-    output = model(input, input)
+    model = PredRNN(3, [64, 64, 64], configs).float().to(device)
+
+    input = np.random.random((1,9,64,64, 1))
+    mask = np.random.random((1,3,64,64,1))
+    input = torch.from_numpy(reshape_patch(input, configs.patch_size)).float().to(device)
+    mask = torch.from_numpy(reshape_patch(mask, configs.patch_size)).float().to(device)
+    output = model(input, mask)
+    output = reshape_patch_back(output.data.cpu().numpy(), configs.patch_size)
     print(output.shape)

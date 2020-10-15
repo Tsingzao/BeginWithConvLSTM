@@ -2,13 +2,13 @@ import torch
 from torch import nn
 
 
-class DeformConv2d(nn.Module):
+class DeformConv2D(nn.Module):
     def __init__(self, inc, outc, kernel_size=3, padding=1, stride=1, bias=None, modulation=False):
         """
         Args:
             modulation (bool, optional): If True, Modulated Defomable Convolution (Deformable ConvNets v2).
         """
-        super(DeformConv2d, self).__init__()
+        super(DeformConv2D, self).__init__()
         self.kernel_size = kernel_size
         self.padding = padding
         self.stride = stride
@@ -35,7 +35,7 @@ class DeformConv2d(nn.Module):
         if self.modulation:
             m = torch.sigmoid(self.m_conv(x))
 
-        dtype = offset.data.type()
+        dtype, device = offset.data.type(), offset.device
         ks = self.kernel_size
         N = offset.size(1) // 2
 
@@ -43,7 +43,7 @@ class DeformConv2d(nn.Module):
             x = self.zero_padding(x)
 
         # (b, 2N, h, w)
-        p = self._get_p(offset, dtype)
+        p = self._get_p(offset, dtype, device)
 
         # (b, h, w, 2N)
         p = p.contiguous().permute(0, 2, 3, 1)
@@ -88,36 +88,36 @@ class DeformConv2d(nn.Module):
 
         return out
 
-    def _get_p_n(self, N, dtype):
+    def _get_p_n(self, N, dtype, device):
         '''===get the flatten meshgrid corr kernel==='''
         p_n_x, p_n_y = torch.meshgrid(
             torch.arange(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1),
             torch.arange(-(self.kernel_size-1)//2, (self.kernel_size-1)//2+1))
         # (2N, 1)
         p_n = torch.cat([torch.flatten(p_n_x), torch.flatten(p_n_y)], 0)
-        p_n = p_n.view(1, 2*N, 1, 1).type(dtype)
+        p_n = p_n.view(1, 2*N, 1, 1).to(device).type(dtype)
 
         return p_n
 
-    def _get_p_0(self, h, w, N, dtype):
+    def _get_p_0(self, h, w, N, dtype, device):
         '''===get the flatten meshgrid corr x==='''
         p_0_x, p_0_y = torch.meshgrid(
             torch.arange(1, h*self.stride+1, self.stride),
             torch.arange(1, w*self.stride+1, self.stride))
         p_0_x = torch.flatten(p_0_x).view(1, 1, h, w).repeat(1, N, 1, 1)
         p_0_y = torch.flatten(p_0_y).view(1, 1, h, w).repeat(1, N, 1, 1)
-        p_0 = torch.cat([p_0_x, p_0_y], 1).type(dtype)
+        p_0 = torch.cat([p_0_x, p_0_y], 1).to(device).type(dtype)
 
         return p_0
 
-    def _get_p(self, offset, dtype):
+    def _get_p(self, offset, dtype, device):
         '''===get the offset with p==='''
         N, h, w = offset.size(1)//2, offset.size(2), offset.size(3)
 
         # (1, 2N, 1, 1)
-        p_n = self._get_p_n(N, dtype)
+        p_n = self._get_p_n(N, dtype, device)
         # (1, 2N, h, w)
-        p_0 = self._get_p_0(h, w, N, dtype)
+        p_0 = self._get_p_0(h, w, N, dtype, device)
         p = p_0 + p_n + offset
         return p
 
@@ -147,7 +147,7 @@ class DeformConv2d(nn.Module):
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda: 0')
-    deformConv = DeformConv2d(3, 32, modulation=True).to(device)
+    device = torch.device('cuda: 6')
+    deformConv = DeformConv2D(3, 32, modulation=True).to(device)
     x = torch.rand((1, 3, 64, 64)).float().to(device)
     y = deformConv(x)

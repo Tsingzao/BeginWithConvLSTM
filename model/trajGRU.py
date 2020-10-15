@@ -17,18 +17,9 @@ class TrajGRUCell(nn.Module):
                                       nn.LeakyReLU(negative_slope=0.2, inplace=True),
                                       nn.Conv2d(in_channels=32, out_channels=L*2, kernel_size=(5,5), stride=1, padding=(2,2), dilation=(1,1))])
         self.hidden = hidden
-        self.conv = nn.Conv2d(in_channels=inChannel+hidden*L,
-                              out_channels=2*hidden,
-                              kernel_size=kernel,
-                              padding=kernel // 2)
-        self.rconvI = nn.Conv2d(in_channels=inChannel,
-                                out_channels=hidden,
-                                kernel_size=kernel,
-                                padding=kernel // 2)
-        self.rconvH = nn.Conv2d(in_channels=hidden*L,
-                                out_channels=hidden,
-                                kernel_size=kernel,
-                                padding=kernel // 2)
+        self.conv = nn.Conv2d(in_channels=inChannel+hidden*L, out_channels=2*hidden, kernel_size=kernel, padding=kernel // 2)
+        self.rconvI = nn.Conv2d(in_channels=inChannel, out_channels=hidden, kernel_size=kernel, padding=kernel // 2)
+        self.rconvH = nn.Conv2d(in_channels=hidden*L, out_channels=hidden, kernel_size=kernel, padding=kernel // 2)
 
     def wrap(self, input, flow, device=torch.device('cpu')):
         B, C, H, W = input.size()
@@ -151,16 +142,19 @@ class TrajGRU(nn.Module):
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:0')
-    convList = nn.ModuleList([nn.Conv2d(in_channels=4, out_channels=64, kernel_size=3, padding=1).float().to(device),
-                              nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(device)])
-    forList = nn.ModuleList([nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, padding=1, stride=2).float().to(device),
-                             nn.Conv2d(in_channels=32, out_channels=4, kernel_size=3, padding=1).float().to(device)])
-    model1 = TrajGRU(4, [32, 64], [3, 3], enConvList=convList).float().to(device)
-    model2 = TrajGRU(64, [64, 32], [3, 3], forConvList=forList, shape=(1, 64, 128, 128), timeLen=6).float().to(device)
-    input = torch.randn((1, 3, 4, 256, 256)).float().to(device)
+    device = torch.device('cuda:6')
+    convList = nn.ModuleList([nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1).float().to(device),
+                              nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(device),
+                              nn.Conv2d(in_channels=64, out_channels=192, kernel_size=3, padding=1, stride=2).float().to(device)])
+    forList = nn.ModuleList([nn.ConvTranspose2d(in_channels=192, out_channels=64, kernel_size=4, padding=1, stride=2).float().to(device),
+                             nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, padding=1, stride=2).float().to(device),
+                             nn.Conv2d(in_channels=32, out_channels=1, kernel_size=3, padding=1).float().to(device)])
+    model1 = TrajGRU(1, [32, 64, 192], [3, 3, 3], enConvList=convList).float().to(device)
+    model2 = TrajGRU(192, [192, 64, 32], [3, 3, 3], forConvList=forList, shape=(1, 192, 16, 16), timeLen=3).float().to(device)
+    input = torch.randn((1, 6, 1, 64, 64)).float().to(device)
     print(input.shape)
     output = model1(input)
     print(output[0][0].shape, output[1][0].shape, output[1][1].shape)
-    output = model2(input=None, state=output[1][::-1])
+    # output = model2(input=None, state=output[1][::-1])
+    output = model2(input=None, state=[item.to(device) for item in output[1][::-1]])
     print(output[0].shape)

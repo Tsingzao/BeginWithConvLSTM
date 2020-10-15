@@ -463,7 +463,7 @@ class MIM(nn.Module):  # stlstm
     def forward(self, images, schedual_sampling_bool):
 
         for time_step in range(self.total_length - 1):  # 时间步长
-            print('time_step: ' + str(time_step))
+            # print('time_step: ' + str(time_step))
 
             if time_step < self.input_length:  # 小于输入步长
                 x_gen = images[:, time_step]  # 输入大小为 [batch, in_channel,in_height, in_width]
@@ -479,7 +479,7 @@ class MIM(nn.Module):  # stlstm
 
             # 对于 mimblock
             for i in range(1, self.num_layers):
-                print('i: ' + str(i))
+                # print('i: ' + str(i))
                 if time_step > 0:
                     if i == 1:
                         self.hidden_state_diff[i - 1], self.cell_state_diff[i - 1] = self.stlstm_layer_diff[i - 1](
@@ -506,23 +506,25 @@ class MIM(nn.Module):  # stlstm
         self.gen_images = torch.stack(self.gen_images, dim=1)
         loss_fn = nn.MSELoss()
         loss = loss_fn(self.gen_images, images[:, 1:])
-        return [self.gen_images, loss]
+        # return [self.gen_images, loss]
+        return self.gen_images[:,-(self.total_length-self.input_length):]
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:2')
-    a = torch.randn((5, 6, 1, 64, 64)).float().to(device)
-    b = torch.randn((5, 2, 1, 64, 64)).float().to(device)
+    device = torch.device('cuda:6')
+    a = torch.randn((1, 9, 1, 64, 64)).float().to(device)
+    b = torch.randn((1, 6, 1, 64, 64)).float().to(device)
 
     num_layers = 3
     num_hidden = [64, 64, 64]
     filter_size = 5
     total_length = a.shape[1]
-    input_length = a.shape[1]
-    shape = [5, 6, 1, 64, 64]
+    input_length = b.shape[1]
+    shape = [1, 6, 1, 64, 64]
 
     stlstm = MIM(shape, num_layers, num_hidden, filter_size, total_length, input_length).float().to(device)
 
     new = stlstm(a, b)
-    print(new[0].shape)
-    print(new[1])
+    # print(new[0].shape)
+    # print(new[1])
+    print(new.shape)

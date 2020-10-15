@@ -161,16 +161,12 @@ class E3DLSTM(nn.Module):
         for step, x in enumerate(input):
             for cell_idx, cell in enumerate(self._cells):
                 if step == 0:
-                    c_history, m, h = self._cells[cell_idx].init_hidden(
-                        batch_size, self._tau, input.device
-                    )
+                    c_history, m, h = self._cells[cell_idx].init_hidden(batch_size, self._tau, input.device)
                     c_history_states.append(c_history)
                     h_states.append(h)
 
                 # NOTE c_history and h are coming from the previous time stamp, but we iterate over cells
-                c_history, m, h = cell(
-                    x, c_history_states[cell_idx], m, h_states[cell_idx]
-                )
+                c_history, m, h = cell(x, c_history_states[cell_idx], m, h_states[cell_idx])
                 c_history_states[cell_idx] = c_history
                 h_states[cell_idx] = h
                 # NOTE hidden state of previous LSTM is passed as input to the next one
@@ -183,28 +179,24 @@ class E3DLSTM(nn.Module):
 
 
 if __name__ == '__main__':
-    device = torch.device("cuda:2")
+    device = torch.device("cuda:6")
     dtype = torch.float
 
-    h, w, c = 32, 32, 4
-    input_time_window = 4 
-    output_time_horizon = 1 
-    temporal_stride = 1
-    temporal_frames = 2 
-    time_steps = (input_time_window - temporal_frames + 1) // temporal_stride
+    h, w, c = 64, 64, 1
+    temporal_frames = 3
+    time_steps = 6
 
     # Initiate the network
     # CxT×H×W
     input_shape = (c, temporal_frames, h, w)
-    output_shape = (c, output_time_horizon, h, w)
 
     tau = 2
     hidden_size = 64
-    kernel = (2, 5, 5)
-    lstm_layers = 4
+    kernel = (1, 5, 5)
+    lstm_layers = 3
 
     encoder = E3DLSTM(input_shape, hidden_size, lstm_layers, kernel, tau).type(dtype).to(device)
-    decoder = nn.Conv3d(hidden_size * time_steps, output_shape[0], kernel, padding=(0, 2, 2)).type(dtype).to(device)
+    decoder = nn.Conv3d(hidden_size * time_steps, c, kernel, padding=(0, 2, 2)).type(dtype).to(device)
 
     input = torch.randn((time_steps, 1, c, temporal_frames, h, w)).float().to(device)
     output = encoder(input)

@@ -154,14 +154,14 @@ class GHU(nn.Module):
 
 
 class RNN(nn.Module):
-    def __init__(self, shape, num_layers, num_hidden, seq_length, tln=True):
+    def __init__(self, shape, batch, num_layers, num_hidden, seq_length, tln=True):
         super(RNN, self).__init__()
 
         self.img_width = shape[-2]
         self.img_height = shape[-1]
         self.total_length = shape[1]
         self.input_length = shape[0]
-        self.shape = [shape[0], shape[2], shape[3], shape[4]]
+        self.shape = [batch, shape[2], shape[3], shape[4]]
         self.num_layers = num_layers
         self.num_hidden = num_hidden
         cell_list = []
@@ -216,14 +216,14 @@ class RNN(nn.Module):
         out = next_images
         next_images = []
 
-        return out
+        return out[:,-(self.total_length-self.input_length):]
 
 
 if __name__ == '__main__':
-    device = torch.device('cuda:1')
-    a = torch.randn(2, 6, 1, 250, 350).float().to(device)
-    shape = [2, 6, 1, 250, 350]
-    numlayers = 4
-    predrnn = RNN(shape, numlayers, [1, 1, 1, 1], 6, True).float().to(device)
+    device = torch.device('cuda:6')
+    shape = [6, 9, 1, 64, 64]
+    a = torch.randn((1, 6, 1, 64, 64)).float().to(device)
+    numlayers = 3
+    predrnn = RNN(shape, 1, numlayers, [64, 64, 64], 6, True).float().to(device)
     predict = predrnn(a)
     print(predict.shape)

@@ -98,9 +98,9 @@ class ConvLSTM(nn.Module):
 if __name__ == '__main__':
     import numpy as np
     device = torch.device('cuda:2')
-    input = torch.from_numpy(np.random.random((1, 6, 5, 256, 256))).float().to(device)
-    model1 = ConvLSTM(5, [64], [3], 1).float().to(device)
-    model2 = ConvLSTM(5, [64], [3], timeLen=3, outConv=nn.Conv2d(in_channels=64, out_channels=5, kernel_size=3, padding=1), useLast=True).float().to(device)
+    input = torch.from_numpy(np.random.random((1, 6, 1, 64, 64))).float().to(device)
+    model1 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], 1).float().to(device)
+    model2 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], timeLen=3, outConv=nn.Conv2d(in_channels=192, out_channels=1, kernel_size=3, padding=1), useLast=True).float().to(device)
     output = model1(input)
     output = model2(input[:,0], output[1])
     # print(Predictor)
