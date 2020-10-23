@@ -95,14 +95,30 @@ class ConvLSTM(nn.Module):
         return outputList, (h, c)
 
 
+class ConvLSTMNet(nn.Module):
+    def __init__(self, inChannel=1, hidden=[64, 64, 64], kernel=[3, 3, 3], outLen=6):
+        super(ConvLSTMNet, self).__init__()
+        outConv = nn.Conv2d(in_channels=hidden[-1], out_channels=inChannel, kernel_size=kernel[0], padding=kernel[0]//2)
+        self.encoder = ConvLSTM(inChannel, hidden, kernel, True)
+        self.decoder = ConvLSTM(inChannel, hidden, kernel, timeLen=outLen, outConv=outConv, useLast=True)
+    def forward(self, input):
+        output = self.encoder(input)
+        output = self.decoder(input[:,-1], output[1])
+        return output[0]
+
+
 if __name__ == '__main__':
     import numpy as np
     device = torch.device('cuda:2')
     input = torch.from_numpy(np.random.random((1, 6, 1, 64, 64))).float().to(device)
-    model1 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], 1).float().to(device)
-    model2 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], timeLen=3, outConv=nn.Conv2d(in_channels=192, out_channels=1, kernel_size=3, padding=1), useLast=True).float().to(device)
-    output = model1(input)
-    output = model2(input[:,0], output[1])
-    # print(Predictor)
-    print(output[1][0].shape, output[1][1].shape, output[0].shape)
+    # model1 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], 1).float().to(device)
+    # model2 = ConvLSTM(1, [32, 64, 192], [3, 3, 3], timeLen=3, outConv=nn.Conv2d(in_channels=192, out_channels=1, kernel_size=3, padding=1), useLast=True).float().to(device)
+    # output = model1(input)
+    # output = model2(input[:,0], output[1])
+    # # print(Predictor)
+    # print(output[1][0].shape, output[1][1].shape, output[0].shape)
 
+
+    model = ConvLSTMNet().float().to(device)
+    output = model(input)
+    print(output.shape)

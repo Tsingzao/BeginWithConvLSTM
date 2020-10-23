@@ -219,11 +219,25 @@ class RNN(nn.Module):
         return out[:,-(self.total_length-self.input_length):]
 
 
+class PredRNNPP(nn.Module):
+    def __init__(self, hidden=[64, 64, 64], inputLen=6, outputLen=6):
+        super(PredRNNPP, self).__init__()
+        shape = [inputLen, inputLen+outputLen, 1, 64, 64]
+        numlayers = len(hidden)
+        self.model = RNN(shape, 1, numlayers, hidden, 6, True)
+
+    def forward(self, input):
+        return self.model(input)
+
+
 if __name__ == '__main__':
-    device = torch.device('cuda:6')
-    shape = [6, 9, 1, 64, 64]
+    device = torch.device('cuda:0')
+    # shape = [6, 9, 1, 64, 64]
     a = torch.randn((1, 6, 1, 64, 64)).float().to(device)
-    numlayers = 3
-    predrnn = RNN(shape, 1, numlayers, [64, 64, 64], 6, True).float().to(device)
-    predict = predrnn(a)
-    print(predict.shape)
+    # numlayers = 3
+    # predrnn = RNN(shape, 1, numlayers, [64, 64, 64], 6, True).float().to(device)
+    # predict = predrnn(a)
+    # print(predict.shape)
+    model = PredRNNPP().float().to(device)
+    output = model(a)
+    print(output.shape)

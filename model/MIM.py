@@ -469,8 +469,8 @@ class MIM(nn.Module):  # stlstm
                 x_gen = images[:, time_step]  # 输入大小为 [batch, in_channel,in_height, in_width]
             else:
                 # 掩模 mask
-                x_gen = schedual_sampling_bool[:, time_step - self.input_length] * images[:, time_step] + \
-                        (1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen
+                x_gen = (1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen#schedual_sampling_bool[:, time_step - self.input_length] * images[:, time_step] + \
+                        #(1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen
 
             preh = self.hidden_state[0]  # 初始化状态
             self.hidden_state[0], self.cell_state[0], self.st_memory = self.stlstm_layer[0](
@@ -510,21 +510,35 @@ class MIM(nn.Module):  # stlstm
         return self.gen_images[:,-(self.total_length-self.input_length):]
 
 
+class MIMNet(nn.Module):
+    def __init__(self, inputLen=6, outputLen=6, num_layers=3, num_hidden=[64, 64, 64], filter_size=5):
+        super(MIMNet, self).__init__()
+        shape = [1, inputLen, 1, 64, 64]
+        self.model = MIM(shape, num_layers, num_hidden, filter_size, inputLen+outputLen, inputLen)
+
+    def forward(self, input, mask):
+        return self.model(input, mask)
+
+
 if __name__ == '__main__':
-    device = torch.device('cuda:6')
+    device = torch.device('cuda:0')
     a = torch.randn((1, 9, 1, 64, 64)).float().to(device)
     b = torch.randn((1, 6, 1, 64, 64)).float().to(device)
 
-    num_layers = 3
-    num_hidden = [64, 64, 64]
-    filter_size = 5
-    total_length = a.shape[1]
-    input_length = b.shape[1]
-    shape = [1, 6, 1, 64, 64]
+    # num_layers = 3
+    # num_hidden = [64, 64, 64]
+    # filter_size = 5
+    # total_length = a.shape[1]
+    # input_length = b.shape[1]
+    # shape = [1, 6, 1, 64, 64]
 
-    stlstm = MIM(shape, num_layers, num_hidden, filter_size, total_length, input_length).float().to(device)
+    # stlstm = MIM(shape, num_layers, num_hidden, filter_size, total_length, inputLen).float().to(device)
 
-    new = stlstm(a, b)
+    # new = stlstm(a, b)
     # print(new[0].shape)
     # print(new[1])
-    print(new.shape)
+    # print(new.shape)
+
+    model = MIMNet().float().to(device)
+    output = model(a, b)
+    print(output.shape)

@@ -15,19 +15,24 @@ from model.DeformConv.deform_conv import DeformConv2D
     output = gru(input, state)
     print(output.shape)
 '''
+
+
 class TrajGRUCell(nn.Module):
     def __init__(self, inChannel, hidden, kernel):
         super(TrajGRUCell, self).__init__()
-        self.convUV = nn.Sequential(*[nn.Conv2d(in_channels=inChannel+hidden, out_channels=32, kernel_size=(5,5), stride=1, padding=(2,2), dilation=(1,1)),
-                                      nn.LeakyReLU(negative_slope=0.2, inplace=True),
-                                      nn.Conv2d(in_channels=32, out_channels=hidden, kernel_size=(5,5), stride=1, padding=(2,2), dilation=(1,1))
-                                      ])
+        self.convUV = nn.Sequential(*[
+            nn.Conv2d(in_channels=inChannel + hidden, out_channels=32, kernel_size=(5, 5), stride=1, padding=(2, 2),
+                      dilation=(1, 1)),
+            nn.LeakyReLU(negative_slope=0.2, inplace=True),
+            nn.Conv2d(in_channels=32, out_channels=hidden, kernel_size=(5, 5), stride=1, padding=(2, 2),
+                      dilation=(1, 1))
+            ])
         self.offsets = nn.Conv2d(hidden, 18, kernel_size=3, padding=1)
         self.defconv = DeformConv2D(hidden, hidden, kernel_size=3, padding=1)
 
         self.hidden = hidden
-        self.conv = nn.Conv2d(in_channels=inChannel+hidden,
-                              out_channels=2*hidden,
+        self.conv = nn.Conv2d(in_channels=inChannel + hidden,
+                              out_channels=2 * hidden,
                               kernel_size=kernel,
                               padding=kernel // 2)
         self.rconvI = nn.Conv2d(in_channels=inChannel,
@@ -52,8 +57,8 @@ class TrajGRUCell(nn.Module):
         z, r = torch.split(comb, self.hidden, dim=1)
         z = torch.sigmoid(z)
         r = torch.sigmoid(r)
-        h_ = F.leaky_relu(self.rconvI(input)+r*self.rconvH(wrapped_data), negative_slope=0.2, inplace=True)
-        h = (1-z)*h_+z*h
+        h_ = F.leaky_relu(self.rconvI(input) + r * self.rconvH(wrapped_data), negative_slope=0.2, inplace=True)
+        h = (1 - z) * h_ + z * h
         return h
 
     def init_state(self, batch, size):
@@ -62,7 +67,8 @@ class TrajGRUCell(nn.Module):
 
 
 class TrajGRU(nn.Module):
-    def __init__(self, inChannel, hiddenList, kernelList, return_all=False, timeLen=None, useLast=True, shape=None, enConvList=None, forConvList=None):
+    def __init__(self, inChannel, hiddenList, kernelList, return_all=False, timeLen=None, useLast=True, shape=None,
+                 enConvList=None, forConvList=None):
         super(TrajGRU, self).__init__()
         self.nlayer = len(hiddenList)
         self.return_all = return_all
@@ -94,14 +100,14 @@ class TrajGRU(nn.Module):
         if state is None:
             state = []
             for i in range(self.nlayer):
-                hh, ww = hh//self.enConvList[i].stride[0], ww//self.enConvList[i].stride[1]
+                hh, ww = hh // self.enConvList[i].stride[0], ww // self.enConvList[i].stride[1]
                 state.append(self.TrajGRUList[i].init_state(b, (hh, ww)))
         outputList = []
         for l in range(self.nlayer):
             h = state[l]
             output = []
             for tt in range(t):
-                inp = self.enConvList[l](input[:,tt]) if self.enConvList else input[:,tt]
+                inp = self.enConvList[l](input[:, tt]) if self.enConvList else input[:, tt]
                 h = self.TrajGRUList[l](inp, h)
                 output.append(h)
             input = torch.stack(output, dim=1)
@@ -123,7 +129,7 @@ class TrajGRU(nn.Module):
             print('State == None is not recommend for decoding')
             for i in range(self.nlayer):
                 state.append(self.TrajGRUList[i].init_state(b, (h0, w0)))
-                h0, w0 = h0*self.forConvList[i].stride, w0*self.forConvList[i].stride
+                h0, w0 = h0 * self.forConvList[i].stride, w0 * self.forConvList[i].stride
 
         t = self.timeLen
         outputList = []
@@ -139,22 +145,50 @@ class TrajGRU(nn.Module):
         return outputList, h
 
 
+class DeformConvGRUNet(nn.Module):
+    def __init__(self, inChannel=1, hidden=[64, 64, 64], kernel=[3, 3, 3], outLen=6):
+        super(DeformConvGRUNet, self).__init__()
+        convList = nn.ModuleList(
+            [nn.Conv2d(in_channels=1, out_channels=64, kernel_size=3, padding=1),
+             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1, stride=2),
+             nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1, stride=2)])
+        forList = nn.ModuleList(
+            [nn.ConvTranspose2d(in_channels=64, out_channels=64, kernel_size=4, padding=1, stride=2),
+             nn.ConvTranspose2d(in_channels=64, out_channels=64, kernel_size=4, padding=1, stride=2),
+             nn.Conv2d(in_channels=64, out_channels=1, kernel_size=3, padding=1)])
+
+        self.encoder = TrajGRU(inChannel, hidden, kernel, enConvList=convList)
+        self.decoder = TrajGRU(hidden[-1], hidden, kernel, forConvList=forList, shape=(1, hidden[-1], 16, 16), timeLen=outLen)
+
+    def forward(self, input):
+        output = self.encoder(input)
+        output = self.decoder(None, [item for item in output[1][::-1]])
+        return output[0]
+
+
 if __name__ == '__main__':
-    device = torch.device('cuda:6')
-    convList = nn.ModuleList([nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1).float().to(device),
-                              nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(device),
-                              nn.Conv2d(in_channels=64, out_channels=192, kernel_size=3, padding=1, stride=2).float().to(device)])
-    forList = nn.ModuleList([nn.ConvTranspose2d(in_channels=192, out_channels=64, kernel_size=4, padding=1, stride=2).float().to(device),
-                             nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, padding=1, stride=2).float().to(device),
-                             nn.Conv2d(in_channels=32, out_channels=1, kernel_size=3, padding=1).float().to(device)])
-    model1 = TrajGRU(1, [32, 64, 192], [3, 3, 3], enConvList=convList).float().to(device)
-    model2 = TrajGRU(192, [192, 64, 32], [3, 3, 3], forConvList=forList, shape=(1, 192, 16, 16), timeLen=3).float().to(device)
+    device = torch.device('cuda:0')
+    # convList = nn.ModuleList([nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1).float().to(device),
+    #                           nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1, stride=2).float().to(
+    #                               device),
+    #                           nn.Conv2d(in_channels=64, out_channels=192, kernel_size=3, padding=1,
+    #                                     stride=2).float().to(device)])
+    # forList = nn.ModuleList(
+    #     [nn.ConvTranspose2d(in_channels=192, out_channels=64, kernel_size=4, padding=1, stride=2).float().to(device),
+    #      nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=4, padding=1, stride=2).float().to(device),
+    #      nn.Conv2d(in_channels=32, out_channels=1, kernel_size=3, padding=1).float().to(device)])
+    # model1 = TrajGRU(1, [32, 64, 192], [3, 3, 3], enConvList=convList).float().to(device)
+    # model2 = TrajGRU(192, [192, 64, 32], [3, 3, 3], forConvList=forList, shape=(1, 192, 16, 16), timeLen=3).float().to(
+    #     device)
     input = torch.randn((1, 6, 1, 64, 64)).float().to(device)
-    print(input.shape)
-    output = model1(input)
-    print(output[0][0].shape, output[1][0].shape, output[1][1].shape)
-    output = model2(input=None, state=[item.to(device) for item in output[1][::-1]])
-    # output = model2(input=None, state=output[1][::-1])
-    # input = [torch.randn((1,64,128,128)).float().to(device), torch.randn((1,32,256,256)).float().to(device)]
-    # output = model2(input=None, state=input)
-    print(output[0].shape)
+    # print(input.shape)
+    # output = model1(input)
+    # print(output[0][0].shape, output[1][0].shape, output[1][1].shape)
+    # output = model2(input=None, state=[item.to(device) for item in output[1][::-1]])
+    # # output = model2(input=None, state=output[1][::-1])
+    # # input = [torch.randn((1,64,128,128)).float().to(device), torch.randn((1,32,256,256)).float().to(device)]
+    # # output = model2(input=None, state=input)
+    # print(output[0].shape)
+    model = DeformConvGRUNet().float().to(device)
+    output = model(input)
+    print(output.shape)

@@ -96,14 +96,29 @@ class ConvGRU(nn.Module):
         return outputList, h
 
 
+class ConvGRUNet(nn.Module):
+    def __init__(self, inChannel=1, hidden=[64, 64, 64], kernel=[3, 3, 3], outLen=6):
+        super(ConvGRUNet, self).__init__()
+        outConv = nn.Conv2d(in_channels=hidden[-1], out_channels=inChannel, kernel_size=kernel[0], padding=kernel[0]//2)
+        self.encoder = ConvGRU(inChannel, hidden, kernel, True)
+        self.decoder = ConvGRU(inChannel, hidden, kernel, timeLen=outLen, outConv=outConv, useLast=True)
+    def forward(self, input):
+        output = self.encoder(input)
+        output = self.decoder(input[:,-1], output[1])
+        return output[0]
+
+
 if __name__ == '__main__':
     import numpy as np
     device = torch.device('cuda:6')
     input = torch.from_numpy(np.random.random((1, 6, 1, 64, 64))).float().to(device)
-    model1 = ConvGRU(1, [32, 64, 192], [3, 3, 3], 1).float().to(device)
-    model2 = ConvGRU(1, [32, 64, 192], [3, 3, 3], timeLen=3, outConv=nn.Conv2d(in_channels=192, out_channels=1, kernel_size=3, padding=1), useLast=True).float().to(device)
-    output = model1(input)
-    print(output[1][0].shape, output[0][0].shape)
-    output = model2(input[:,0], output[1])
-    print(output[1].shape, output[0].shape)
+    # model1 = ConvGRU(1, [32, 64, 192], [3, 3, 3], 1).float().to(device)
+    # model2 = ConvGRU(1, [32, 64, 192], [3, 3, 3], timeLen=3, outConv=nn.Conv2d(in_channels=192, out_channels=1, kernel_size=3, padding=1), useLast=True).float().to(device)
+    # output = model1(input)
+    # print(output[1][0].shape, output[0][0].shape)
+    # output = model2(input[:,0], output[1])
+    # print(output[1].shape, output[0].shape)
+    model = ConvGRUNet().float().to(device)
+    output = model(input)
+    print(output.shape)
 

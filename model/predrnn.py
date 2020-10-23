@@ -2,6 +2,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from easydict import EasyDict as edict
 
 def reshape_patch(img_tensor, patch_size):
     assert 5 == img_tensor.ndim
@@ -129,11 +130,11 @@ class PredRNN(nn.Module):
         c_t = []
 
         for i in range(self.num_layers):
-            zeros = torch.zeros([batch, self.num_hidden[i], height, width]).to(self.configs.device)
+            zeros = torch.zeros([batch, self.num_hidden[i], height, width]).to(self.conv_last.weight.device)
             h_t.append(zeros)
             c_t.append(zeros)
 
-        memory = torch.zeros([batch, self.num_hidden[0], height, width]).to(self.configs.device)
+        memory = torch.zeros([batch, self.num_hidden[0], height, width]).to(self.conv_last.weight.device)
 
         for t in range(self.configs.total_length-1):
             if t < self.configs.input_length:
@@ -155,19 +156,35 @@ class PredRNN(nn.Module):
 
         return next_frames[:,-(self.configs.total_length-self.configs.input_length):]
 
+class PredRNNNet(nn.Module):
+
+    def __init__(self, hidden=[64, 64, 64]):
+        super(PredRNNNet, self).__init__()
+        configs = edict()
+        configs.patch_size = 4
+        configs.img_width = 64
+        configs.filter_size = 5
+        configs.stride = 1
+        configs.total_length = 12
+        configs.input_length = 6
+        self.model = PredRNN(len(hidden), hidden, configs)
+
+    def forward(self, input, mask):
+        return self.model(input, mask)
 
 if __name__ == '__main__':
     device = torch.device('cuda:6')
-    from easydict import EasyDict as edict
+    # from easydict import EasyDict as edict
     configs = edict()
     configs.patch_size = 4
-    configs.img_width = 64
-    configs.filter_size = 5
-    configs.stride = 1
-    configs.total_length = 9
-    configs.input_length = 6
-    configs.device = device
-    model = PredRNN(3, [64, 64, 64], configs).float().to(device)
+    # configs.img_width = 64
+    # configs.filter_size = 5
+    # configs.stride = 1
+    # configs.total_length = 9
+    # configs.input_length = 6
+    # configs.device = device
+    # model = PredRNN(3, [64, 64, 64], configs).float().to(device)
+    model = PredRNNNet().float().to(device)
 
     input = np.random.random((1,9,64,64, 1))
     mask = np.random.random((1,3,64,64,1))

@@ -177,29 +177,34 @@ class E3DLSTM(nn.Module):
         # NOTE Concat along the channels
         return torch.cat(outputs, dim=1)
 
+class E3DLSTMNet(nn.Module):
+    def __init__(self, time_steps=6, timeLen=6, hidden=64, lstm_layers=3, kernel=(1,5,5)):
+        input_shape = (1, timeLen, 64, 64)
+        super(E3DLSTMNet, self).__init__()
+        self.encoder = E3DLSTM(input_shape, hidden, lstm_layers, kernel, input_shape[1])
+        self.decoder = nn.Conv3d(hidden * time_steps, input_shape[0], kernel, padding=(0, 2, 2))
+    def forward(self, input):
+        return self.decoder(self.encoder(input))
 
 if __name__ == '__main__':
-    device = torch.device("cuda:6")
+    device = torch.device("cuda:0")
     dtype = torch.float
 
     h, w, c = 64, 64, 1
-    temporal_frames = 3
+    timeLen = 3
     time_steps = 6
 
-    # Initiate the network
-    # CxT×H×W
-    input_shape = (c, temporal_frames, h, w)
 
-    tau = 2
-    hidden_size = 64
-    kernel = (1, 5, 5)
-    lstm_layers = 3
+    # encoder = E3DLSTM(input_shape, hidden_size, lstm_layers, kernel, tau).type(dtype).to(device)
+    # decoder = nn.Conv3d(hidden_size * time_steps, c, kernel, padding=(0, 2, 2)).type(dtype).to(device)
+    #
+    # input = torch.randn((time_steps, 1, c, temporal_frames, h, w)).float().to(device)
+    # output = encoder(input)
+    # print(output.shape)
+    # output = decoder(output)
+    # print(output.shape)
 
-    encoder = E3DLSTM(input_shape, hidden_size, lstm_layers, kernel, tau).type(dtype).to(device)
-    decoder = nn.Conv3d(hidden_size * time_steps, c, kernel, padding=(0, 2, 2)).type(dtype).to(device)
-
-    input = torch.randn((time_steps, 1, c, temporal_frames, h, w)).float().to(device)
-    output = encoder(input)
-    print(output.shape)
-    output = decoder(output)
+    input = torch.randn((time_steps, 1, 1, timeLen, 64, 64)).float().to(device)
+    model = E3DLSTMNet().float().to(device)
+    output = model(input)
     print(output.shape)
