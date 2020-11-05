@@ -140,7 +140,7 @@ class PredRNN(nn.Module):
             if t < self.configs.input_length:
                 net = frames[:,t]
             else:
-                net = mask_true[:, t - self.configs.input_length] * frames[:, t] + \
+                net = mask_true[:, t - self.configs.input_length] * frames[:, -1] + \
                       (1 - mask_true[:, t - self.configs.input_length]) * x_gen
 
             h_t[0], c_t[0], memory = self.cell_list[0](net, h_t[0], c_t[0], memory)
@@ -173,7 +173,7 @@ class PredRNNNet(nn.Module):
         return self.model(input, mask)
 
 if __name__ == '__main__':
-    device = torch.device('cuda:6')
+    device = torch.device('cuda:0')
     # from easydict import EasyDict as edict
     configs = edict()
     configs.patch_size = 4
@@ -186,8 +186,8 @@ if __name__ == '__main__':
     # model = PredRNN(3, [64, 64, 64], configs).float().to(device)
     model = PredRNNNet().float().to(device)
 
-    input = np.random.random((1,9,64,64, 1))
-    mask = np.random.random((1,3,64,64,1))
+    input = np.random.random((1,6,64,64, 1))
+    mask = np.random.random((1,6,64,64,1))
     input = torch.from_numpy(reshape_patch(input, configs.patch_size)).float().to(device)
     mask = torch.from_numpy(reshape_patch(mask, configs.patch_size)).float().to(device)
     output = model(input, mask)

@@ -460,16 +460,16 @@ class MIM(nn.Module):  # stlstm
                                self.output_channels, 1, 1, padding=0
                                )
 
-    def forward(self, images, schedual_sampling_bool):
-
+    def forward(self, images):#, schedual_sampling_bool):
+        self.gen_images = []
         for time_step in range(self.total_length - 1):  # 时间步长
             # print('time_step: ' + str(time_step))
 
             if time_step < self.input_length:  # 小于输入步长
                 x_gen = images[:, time_step]  # 输入大小为 [batch, in_channel,in_height, in_width]
-            else:
-                # 掩模 mask
-                x_gen = (1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen#schedual_sampling_bool[:, time_step - self.input_length] * images[:, time_step] + \
+            # else:
+            #     # 掩模 mask
+            #     x_gen = (1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen#schedual_sampling_bool[:, time_step - self.input_length] * images[:, time_step] + \
                         #(1 - schedual_sampling_bool[:, time_step - self.input_length]) * x_gen
 
             preh = self.hidden_state[0]  # 初始化状态
@@ -504,8 +504,8 @@ class MIM(nn.Module):  # stlstm
             self.gen_images.append(x_gen)
 
         self.gen_images = torch.stack(self.gen_images, dim=1)
-        loss_fn = nn.MSELoss()
-        loss = loss_fn(self.gen_images, images[:, 1:])
+        # loss_fn = nn.MSELoss()
+        # loss = loss_fn(self.gen_images, images[:, 1:])
         # return [self.gen_images, loss]
         return self.gen_images[:,-(self.total_length-self.input_length):]
 
@@ -516,13 +516,13 @@ class MIMNet(nn.Module):
         shape = [1, inputLen, 1, 64, 64]
         self.model = MIM(shape, num_layers, num_hidden, filter_size, inputLen+outputLen, inputLen)
 
-    def forward(self, input, mask):
-        return self.model(input, mask)
+    def forward(self, input):#, mask):
+        return self.model(input)#, mask)
 
 
 if __name__ == '__main__':
     device = torch.device('cuda:0')
-    a = torch.randn((1, 9, 1, 64, 64)).float().to(device)
+    a = torch.randn((1, 6, 1, 64, 64)).float().to(device)
     b = torch.randn((1, 6, 1, 64, 64)).float().to(device)
 
     # num_layers = 3
@@ -531,14 +531,15 @@ if __name__ == '__main__':
     # total_length = a.shape[1]
     # input_length = b.shape[1]
     # shape = [1, 6, 1, 64, 64]
-
-    # stlstm = MIM(shape, num_layers, num_hidden, filter_size, total_length, inputLen).float().to(device)
-
+    #
+    # stlstm = MIM(shape, num_layers, num_hidden, filter_size, total_length, input_length).float().to(device)
+    #
+    #
     # new = stlstm(a, b)
     # print(new[0].shape)
     # print(new[1])
     # print(new.shape)
 
     model = MIMNet().float().to(device)
-    output = model(a, b)
+    output = model(a)#, b)
     print(output.shape)

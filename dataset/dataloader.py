@@ -34,9 +34,39 @@ class OwnLoader(Dataset):
     def __len__(self):
         return len(self.fileList)
 
+class RadarLoader(Dataset):
+    def __init__(self, mode='train'):
+        super(RadarLoader, self).__init__()
+        with open('./dataset/radarList', 'r') as fp:
+            lines = fp.readlines()
+        if mode == 'train':
+            self.fileList = lines[:8000]
+        elif mode == 'valid':
+            self.fileList = lines[8000:9000]
+        else:
+            self.fileList = lines[9000:]
+
+    def __getitem__(self, index):
+        feature = []
+        fileIdx = self.fileList[index].strip()
+        pathFormat = '/home/tsingzao/Dataset/Radar/train/%s_%03d.png'
+        for i in range(21):
+            path = pathFormat % (fileIdx, i)
+            image = io.imread(path)
+            image[image == 255] = 0
+            image = image.astype('float')
+            image /= 80
+            image[image > 1] = 1
+            feature.append(image[::4,::4])
+        data = np.expand_dims(np.asarray(feature), axis=1)
+        return data
+
+    def __len__(self):
+        return len(self.fileList)
 
 if __name__ == '__main__':
-    loader = iter(DataLoader(OwnLoader(type='Radar'), shuffle=True))
+    # loader = iter(DataLoader(OwnLoader(type='Temperature'), shuffle=True))
+    loader = iter(DataLoader(RadarLoader(), shuffle=True))
     img = next(loader)
     print(img.shape)
     import matplotlib.pyplot as plt

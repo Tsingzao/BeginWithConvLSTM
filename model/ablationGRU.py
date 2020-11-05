@@ -1,19 +1,17 @@
 import torch
 import torch.nn as nn
+from model.AxialAttention.axial_attention_v2 import AxialAttention
 
 
 class ConvGRUCell(nn.Module):
     def __init__(self, inChannel, hidden, kernel):
         super(ConvGRUCell, self).__init__()
         self.hidden = hidden
-        self.conv = nn.Conv2d(in_channels=inChannel+hidden,
-                              out_channels=2*hidden,
-                              kernel_size=kernel,
-                              padding=kernel // 2)
-        self.rconv = nn.Conv2d(in_channels=inChannel+hidden,
-                               out_channels=hidden,
-                               kernel_size=kernel,
-                               padding=kernel // 2)
+        self.conv = nn.Conv2d(in_channels=inChannel+hidden, out_channels=2*hidden, kernel_size=kernel, padding=kernel // 2)
+        self.rconvI = nn.Conv2d(in_channels=inChannel, out_channels=hidden, kernel_size=kernel, padding=kernel // 2)
+        self.rconvH = nn.Conv2d(in_channels=hidden, out_channels=hidden, kernel_size=kernel, padding=kernel // 2)
+
+        self.aat = AxialAttention(hidden, dim_index=1, num_dimensions=2, heads=8)
 
     def forward(self, input, state):
         h = state
@@ -22,7 +20,7 @@ class ConvGRUCell(nn.Module):
         z, r = torch.split(comb, self.hidden, dim=1)
         z = torch.sigmoid(z)
         r = torch.sigmoid(r)
-        h_= torch.tanh(self.rconv(torch.cat([input, r*h], dim=1)))
+        h_= torch.tanh(self.rconvI(input)+self.rconvH(r*h))
         h = (1-z)*h+z*h_
         return h
 
@@ -121,4 +119,3 @@ if __name__ == '__main__':
     model = ConvGRUNet().float().to(device)
     output = model(input)
     print(output.shape)
-
